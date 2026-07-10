@@ -1,7 +1,10 @@
 import "server-only";
-import type { RegistrationRepository } from "@/application/repositories/registration-repository";
+import type {
+  RegistrationListFilters,
+  RegistrationRepository,
+} from "@/application/repositories/registration-repository";
 import type { RegistrationFields } from "@/application/dto/registration.schema";
-import type { Registration } from "@/domain/entities/registration";
+import type { Registration, RegistrationStatus } from "@/domain/entities/registration";
 import type { TicketType } from "@/domain/entities/ticket";
 import type { RegistrationRow } from "@/types/database.types";
 import { DuplicateRegistrationError } from "@/domain/errors/domain-errors";
@@ -95,5 +98,39 @@ export class SupabaseRegistrationRepository implements RegistrationRepository {
 
     if (error) throw new Error(error.message);
     return count ?? 0;
+  }
+
+  async list(filters: RegistrationListFilters): Promise<Registration[]> {
+    let query = this.client
+      .from("registrations")
+      .select()
+      .order("fecha_registro", { ascending: false });
+
+    if (filters.estado) query = query.eq("estado", filters.estado);
+    if (filters.tipoParticipante) query = query.eq("tipo_participante", filters.tipoParticipante);
+
+    const search = filters.search?.trim();
+    if (search) {
+      const escaped = search.replace(/[%_,]/g, (match) => `\\${match}`);
+      query = query.or(
+        `nombres.ilike.%${escaped}%,apellidos.ilike.%${escaped}%,dni.ilike.%${escaped}%,correo.ilike.%${escaped}%`
+      );
+    }
+
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    return (data ?? []).map(toDomain);
+  }
+
+  async updateEstado(id: string, estado: RegistrationStatus): Promise<Registration> {
+    const { data, error } = await this.client
+      .from("registrations")
+      .update({ estado })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+    return toDomain(data);
   }
 }
